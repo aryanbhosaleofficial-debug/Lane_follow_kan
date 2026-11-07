@@ -28,6 +28,8 @@ from .undistort import INTERPOLATIONS
 
 #: Guard against accidental multi-gigabyte BEV allocations.
 MAX_BEV_PIXELS = 4_000_000
+#: Stored in every profile and checked on load, so a profile written under another convention cannot load silently.
+BEV_CONVENTION = "u right, v down, pixel centres at integers; u = origin_u - y/mpp, v = origin_v - x/mpp"
 
 
 @dataclass(frozen=True)
@@ -154,8 +156,7 @@ class BEVConfig:
         return {"width_px": self.width_px, "height_px": self.height_px, "meters_per_pixel": self.meters_per_pixel,
                 "origin_u_px": self.origin_u_px, "origin_v_px": self.origin_v_px, "interpolation": self.interpolation,
                 "border_value": self.border_value, "support_margin_m": self.support_margin_m,
-                "fixed_point_maps": self.fixed_point_maps,
-                "convention": "u right, v down, pixel centres at integers; u = origin_u - y/mpp, v = origin_v - x/mpp"}
+                "fixed_point_maps": self.fixed_point_maps, "convention": BEV_CONVENTION}
 
     @classmethod
     def from_dict(cls, data: dict) -> "BEVConfig":
@@ -164,6 +165,8 @@ class BEVConfig:
         missing = [k for k in ("width_px", "height_px", "meters_per_pixel", "origin_u_px", "origin_v_px") if k not in data]
         if missing:
             raise InvalidBEVRegionError(f"bev missing fields: {missing}")
+        if "convention" in data and data["convention"] != BEV_CONVENTION:
+            raise InvalidBEVRegionError(f"bev.convention is {data['convention']!r}; this software only supports {BEV_CONVENTION!r}")
         kw = {k: data[k] for k in ("interpolation", "border_value", "support_margin_m", "fixed_point_maps") if k in data}
         if "fixed_point_maps" in kw and not isinstance(kw["fixed_point_maps"], bool):
             raise InvalidBEVRegionError("fixed_point_maps must be a boolean")

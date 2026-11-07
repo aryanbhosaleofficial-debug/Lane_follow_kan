@@ -33,7 +33,7 @@ from .mapper import BEVMapper, CameraGeometry
 from .profile import CalibrationProfile
 from .bev import BEVConfig
 from .status import CalibrationStatus
-from .validation import ValidationReport
+from .validation import TrustPolicy, ValidationReport
 
 log = logging.getLogger(__name__)
 
@@ -79,10 +79,17 @@ class BEVFrame:
     notes: tuple[str, ...] = ()
     pixel_format: str = "BGR"
     calibration_status: CalibrationStatus = CalibrationStatus.METRIC_UNVERIFIED
+    _validation_report: ValidationReport | None = None
+    _trust_policy: TrustPolicy | None = None
 
     def validated_geometry(self) -> CameraGeometry:
-        """Metric geometry only after independent measured validation was supplied."""
-        if self.calibration_status is not CalibrationStatus.VALID_METRIC:
+        """Metric geometry only after independent measured validation was supplied, judged against the policy the
+        BEVProcessor was constructed with (not the one the report's producer chose)."""
+        if (self.calibration_status is not CalibrationStatus.VALID_METRIC
+                or self._validation_report is None
+                or self._trust_policy is None
+                or self.profile_fingerprint != self.geometry.profile.fingerprint()
+                or not self._validation_report.trusted_for(self.geometry.profile, self._trust_policy)):
             raise ProfileError("metric distances are not validated for this frame; supply held-out physical measurements")
         return self.geometry
 
@@ -127,13 +134,19 @@ class BEVProcessor:
     """Turns M01 frame packets into :class:`BEVFrame` results. Thread-safe (calls are serialised)."""
 
     def __init__(self, profile: CalibrationProfile, config: ProcessorConfig | None = None,
-                 validation_report: ValidationReport | None = None):
+                 validation_report: ValidationReport | None = None, trust_policy: TrustPolicy | None = None):
+        if not isinstance(profile, CalibrationProfile):
+            raise ProfileError(f"profile must be a CalibrationProfile, got {type(profile).__name__}; load one with CalibrationProfile.load()")
+        if trust_policy is not None and not isinstance(trust_policy, TrustPolicy):
+            raise InvalidCalibrationInputError("trust_policy must be a TrustPolicy")
         profile.require_metric()
+        self.trust_policy = trust_policy or TrustPolicy()      # the CONSUMER's acceptance rule; a report's own policy is not authoritative
         if validation_report is not None and (not isinstance(validation_report, ValidationReport)
-                or validation_report.evidence != "measured" or not validation_report.results
-                or not validation_report.passed or validation_report.profile_fingerprint != profile.fingerprint()):
-            raise ProfileError("VALID_METRIC needs a passing measured validation report for this exact profile")
+                or not validation_report.trusted_for(profile, self.trust_policy)):
+            raise ProfileError("VALID_METRIC needs an attested, passing validator report for this exact non-synthetic profile "
+                               "with distinct references, spatial coverage and tolerances meeting this processor's TrustPolicy")
         self.profile = profile
+        self.validation_report = validation_report
         self.calibration_status = (CalibrationStatus.VALID_METRIC if validation_report is not None
                                    else CalibrationStatus.METRIC_UNVERIFIED)
         self.config = config or ProcessorConfig()
@@ -167,6 +180,8 @@ class BEVProcessor:
         key = (str(packet.session_id), int(packet.frame_id))
         last = self._last
         if last is not None and last.key == key:
+            if last.source_id != redact_credentials(packet.source_id) or last.source_width != w or last.source_height != h:
+                raise InvalidFrameError("repeated frame identity has conflicting source or size metadata")
             self._counters["repeats"] += 1
             return last                                     # same source frame: do not claim a new BEV
         cfg = self.config
@@ -188,7 +203,10 @@ class BEVProcessor:
             log.info("source changed to %s", source_id)
         skipped = None
         if previous_session is not None and previous_session[0] == key[0]:
-            skipped = max(0, key[1] - previous_session[1] - 1)
+            if key[1] < previous_session[1]:
+                raise InvalidFrameError(f"frame id went backwards within session {key[0][:8]!r} "
+                                        f"({previous_session[1]} -> {key[1]}); refusing an out-of-order frame")
+            skipped = key[1] - previous_session[1] - 1
 
         t0 = time.perf_counter()
         try:
@@ -207,9 +225,11 @@ class BEVProcessor:
             bev=mapper.bev, bev_sequence=self._sequence, source_frame_id=key[1], source_session_id=key[0], source_id=source_id,
             acquired_unix_ns=int(packet.acquired_unix_ns), acquired_monotonic_ns=int(packet.acquired_monotonic_ns),
             source_width=w, source_height=h, processed_monotonic_ns=time.monotonic_ns(), processing_seconds=duration,
-            profile_fingerprint=self._fingerprint, source_frames_skipped=skipped,
+            profile_fingerprint=mapper.profile_fingerprint, source_frames_skipped=skipped,
             source_presentation_ms=getattr(packet, "presentation_ms", None), undistorted_image=undistorted, notes=tuple(notes),
-            calibration_status=self.calibration_status)
+            calibration_status=(self.calibration_status if mapper.profile is self.profile else CalibrationStatus.METRIC_UNVERIFIED),
+            _validation_report=(self.validation_report if mapper.profile is self.profile else None),
+            _trust_policy=(self.trust_policy if mapper.profile is self.profile else None))
         self._last = frame
         self._last_frame_id_by_session = key
         self._last_source_id = source_id

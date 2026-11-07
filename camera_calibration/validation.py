@@ -14,6 +14,10 @@ Two kinds of checks, deliberately kept apart:
 from __future__ import annotations
 
 import math
+import hashlib
+import hmac
+import re
+import secrets
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -24,6 +28,64 @@ from .errors import InvalidCalibrationInputError
 from .intrinsics import lens_invertibility_error
 from .mapper import CameraGeometry
 from .profile import CalibrationProfile
+
+_REPORT_KEY = secrets.token_bytes(32)  # process-local: reports must be issued by this validator
+
+#: Evidence floor for ``ValidationReport.trusted_for`` (tune per project, then re-review). A report that passes
+#: with one reference, or with a tolerance wider than the geometry it is meant to certify, proves nothing.
+MIN_TRUSTED_REFERENCES = 3        # independent measured references (an aggregate "RMS error" row is not counted)
+MAX_TRUSTED_TOLERANCE_M = 0.05    # every reference must have been judged against a tolerance no looser than this
+_SYNTHETIC_MARKERS = ("synthetic", "simulat", "placeholder", "fake", "mock", "dummy")
+_HULL_EPS_M = 1e-6                # measurements ON the calibrated hull boundary must not fail through float noise
+
+
+@dataclass(frozen=True)
+class TrustPolicy:
+    """Project acceptance criteria; defaults are screening choices, not physical guarantees."""
+    min_references: int = MIN_TRUSTED_REFERENCES
+    max_tolerance_m: float = MAX_TRUSTED_TOLERANCE_M
+    max_relative_error: float = 0.10
+    min_span_fraction: float = 0.10
+
+    def __post_init__(self):
+        if isinstance(self.min_references, bool) or not isinstance(self.min_references, int) or self.min_references < 3:
+            raise InvalidCalibrationInputError("min_references must be an integer >= 3")
+        if not is_positive_finite(self.max_tolerance_m):
+            raise InvalidCalibrationInputError("max_tolerance_m must be positive and finite")
+        if not is_positive_finite(self.max_relative_error) or self.max_relative_error >= 1:
+            raise InvalidCalibrationInputError("max_relative_error must be within (0, 1)")
+        if not is_positive_finite(self.min_span_fraction) or self.min_span_fraction > 1:
+            raise InvalidCalibrationInputError("min_span_fraction must be within (0, 1]")
+
+
+def _looks_synthetic(origin_description: str) -> bool:
+    """Heuristic guard, not proof: letters-only match so 'S Y N T H E T I C' or 'Synthetic-rig' are still caught."""
+    return any(m in re.sub(r"[^a-z]", "", str(origin_description).lower()) for m in _SYNTHETIC_MARKERS)
+
+
+@dataclass(frozen=True)
+class MeasurementProvenance:
+    """Operator attestation, not authentication of a physical measurement.
+
+    The reference identifies the measurement log or marked target. A fresh runtime
+    report must be generated from the measurements; a JSON summary cannot grant trust.
+    """
+    operator: str
+    method: str
+    reference: str
+    independent_from_fit: bool
+
+    def __post_init__(self):
+        if any(not isinstance(v, str) or not v.strip() for v in (self.operator, self.method, self.reference)):
+            raise InvalidCalibrationInputError("measurement provenance needs operator, method and reference")
+        if self.independent_from_fit is not True:
+            raise InvalidCalibrationInputError("independent_from_fit must be explicitly true")
+
+
+def _report_signature(report: "ValidationReport") -> bytes:
+    payload = repr((report.results, report.evidence, report.profile_fingerprint, report.provenance,
+                    report.trust_policy, report.reference_scales, report.reference_points)).encode()
+    return hmac.new(_REPORT_KEY, payload, hashlib.sha256).digest()
 
 
 @dataclass(frozen=True)
@@ -46,10 +108,44 @@ class ValidationReport:
     evidence: str                 # "self-consistency" or "measured"
     notes: tuple[str, ...] = ()
     profile_fingerprint: str | None = None
+    provenance: MeasurementProvenance | None = None
+    _signature: bytes = b""
+    trust_policy: TrustPolicy = TrustPolicy()
+    reference_scales: tuple[float, ...] = ()
+    reference_points: tuple[tuple[float, float], ...] = ()
 
     @property
     def passed(self) -> bool:
-        return all(r.passed for r in self.results)
+        return bool(self.results) and all(r.passed and math.isfinite(r.value) and math.isfinite(r.limit)
+                                          for r in self.results)
+
+    def trusted_for(self, profile: CalibrationProfile, policy: TrustPolicy | None = None) -> bool:
+        """True only for a passing, attested report issued by this process's validator, bound to this exact profile,
+        with distinct references, spatial coverage and tolerances meeting ``policy``.
+        ``policy`` is the CONSUMER's acceptance rule (``BEVProcessor`` always supplies one); only when it is omitted does the
+        check fall back to the policy the report's producer recorded, which proves nothing about what the consumer needs.
+        This is a runtime integrity and evidence-floor check; it cannot prove a person really measured anything."""
+        references = [r for r in self.results if r.name != "RMS error"]
+        if not self.passed or profile.road_plane is None:
+            return False
+        if policy is not None and not isinstance(policy, TrustPolicy):
+            raise InvalidCalibrationInputError("policy must be a TrustPolicy")
+        policy = self.trust_policy if policy is None else policy
+        points = np.asarray(self.reference_points, float).reshape(-1, 2)
+        hull_span = np.ptp(profile.road_plane.calibrated_hull_m, axis=0)
+        coverage = (len(points) >= 3 and np.isfinite(points).all()
+                    and np.linalg.matrix_rank(points - points.mean(axis=0), tol=1e-6) == 2
+                    and np.all(np.ptp(points, axis=0) >= hull_span * policy.min_span_fraction))
+        return (self.evidence == "measured" and self.passed and self.provenance is not None
+                and coverage and len(references) >= policy.min_references
+                and len(self.reference_scales) == len(references)
+                and all(r.unit == "m" and 0 < r.limit <= policy.max_tolerance_m
+                        and r.limit <= scale * policy.max_relative_error
+                        and r.value <= scale * policy.max_relative_error
+                        for r, scale in zip(references, self.reference_scales))
+                and self.profile_fingerprint == profile.fingerprint()
+                and not _looks_synthetic(profile.road_plane.origin_description)
+                and bool(self._signature) and hmac.compare_digest(self._signature, _report_signature(self)))
 
     def __str__(self) -> str:
         head = f"Validation ({self.evidence}): {'PASS' if self.passed else 'FAIL'}"
@@ -143,32 +239,49 @@ class CalibrationValidator:
         return CheckResult("BEV valid mask vs projection", flagged == 0, float(flagged), 0.0, "pixels")
 
     # -- measurement-based --------------------------------------------------------------
-    def check_distances(self, measurements: Sequence[DistanceMeasurement], tolerance_m: float) -> ValidationReport:
+    def check_distances(self, measurements: Sequence[DistanceMeasurement], tolerance_m: float, *,
+                        provenance: MeasurementProvenance | None = None,
+                        trust_policy: TrustPolicy = TrustPolicy()) -> ValidationReport:
         """Compare distances measured in the BEV/ground plane against tape-measured reference lengths."""
         if not is_positive_finite(tolerance_m):
             raise InvalidCalibrationInputError("tolerance_m must be positive and finite")
         if not measurements:
             raise InvalidCalibrationInputError("provide at least one DistanceMeasurement")
-        results, notes = [], []
+        results, notes, reference_points, keys = [], [], [], set()
         for i, m in enumerate(measurements):
             pts = np.array([m.a_px, m.b_px], float)
             ground, valid = self.geometry.image_to_ground(pts, undistorted=m.undistorted, return_valid=True)
+            key = tuple(sorted(map(tuple, np.round(ground, 6))))
+            if key in keys:
+                raise InvalidCalibrationInputError("duplicate distance reference, including reversed endpoints")
+            keys.add(key)
+            reference_points.extend(map(tuple, ground))
             label = m.label or f"distance {i}"
             if not valid.all():
                 results.append(CheckResult(label, False, float("nan"), tolerance_m, "m", "a point has no ground position (at/above the horizon)"))
                 continue
             d = float(np.linalg.norm(ground[0] - ground[1]))
-            inside = self.geometry.in_calibrated_hull(ground)
+            inside = self.geometry.in_calibrated_hull(ground, margin_m=_HULL_EPS_M)
             err = abs(d - m.distance_m)
             detail = f"measured {m.distance_m:.4f} m, computed {d:.4f} m, relative {err / m.distance_m:.2%}"
+            fit_px = (self.profile.road_plane.image_points_undistorted_px if m.undistorted
+                      else self.profile.road_plane.image_points_raw_px)
+            if fit_px is None:
+                fit_px = self.geometry.distort_points(self.profile.road_plane.image_points_undistorted_px)
+            reused = (np.linalg.norm(pts[:, None, :] - fit_px[None, :, :], axis=2) < 0.5).any(axis=1).all()
+            if reused:
+                detail += " (both endpoints reuse calibration marks: circular evidence)"
             if not inside.all():
                 detail += " (an endpoint lies outside the calibrated hull: extrapolation)"
-            results.append(CheckResult(label, err <= tolerance_m, err, tolerance_m, "m", detail))
+            results.append(CheckResult(label, bool(not reused and inside.all() and err <= tolerance_m), err, tolerance_m, "m", detail))
         notes.append("only points on the road plane are valid; a raised mark (e.g. the top of a cone) is mapped to the ground behind it")
-        return ValidationReport(tuple(results), "measured", tuple(notes), self.profile.fingerprint())
+        return self._measurement_report(results, notes, provenance, trust_policy,
+                                        tuple(m.distance_m for m in measurements), tuple(reference_points))
 
     def check_held_out_points(self, image_points_px: Any, ground_points_m: Any, tolerance_m: float, *,
-                              undistorted: bool = False) -> ValidationReport:
+                              undistorted: bool = False,
+                              provenance: MeasurementProvenance | None = None,
+                              trust_policy: TrustPolicy = TrustPolicy()) -> ValidationReport:
         """Predicted vs measured ground position at points that were NOT used for calibration."""
         if not is_positive_finite(tolerance_m):
             raise InvalidCalibrationInputError("tolerance_m must be positive and finite")
@@ -176,13 +289,32 @@ class CalibrationValidator:
         truth = as_points(ground_points_m, "ground_points_m")
         if len(px) != len(truth):
             raise InvalidCalibrationInputError("point counts differ")
+        if len(np.unique(np.round(truth, 6), axis=0)) != len(truth):
+            raise InvalidCalibrationInputError("duplicate held-out reference")
+        fit = self.profile.road_plane.ground_points_m
+        if np.any(np.linalg.norm(truth[:, None, :] - fit[None, :, :], axis=2) < 1e-6):
+            raise InvalidCalibrationInputError("held-out ground points repeat calibration points; supply independent references")
         pred, valid = self.geometry.image_to_ground(px, undistorted=undistorted, return_valid=True)
         err = np.linalg.norm(pred - truth, axis=1)
-        inside = self.geometry.in_calibrated_hull(truth)
-        results = [CheckResult(f"point {i}", bool(valid[i] and err[i] <= tolerance_m), float(err[i]) if valid[i] else float("nan"),
+        inside = self.geometry.in_calibrated_hull(truth, margin_m=_HULL_EPS_M)
+        results = [CheckResult(f"point {i}", bool(valid[i] and inside[i] and err[i] <= tolerance_m), float(err[i]) if valid[i] else float("nan"),
                                tolerance_m, "m", "" if inside[i] else "outside calibrated hull") for i in range(len(px))]
         if valid.any():
             results.append(CheckResult("RMS error", bool(np.sqrt(np.nanmean(err[valid] ** 2)) <= tolerance_m),
                                        float(np.sqrt(np.nanmean(err[valid] ** 2))), tolerance_m, "m"))
         notes = ["points reused from the calibration set would be circular evidence; use independent measurements"]
-        return ValidationReport(tuple(results), "measured", tuple(notes), self.profile.fingerprint())
+        hull = self.profile.road_plane.calibrated_hull_m
+        scale = float(np.max(np.linalg.norm(hull[:, None] - hull[None, :], axis=2)))
+        return self._measurement_report(results, notes, provenance, trust_policy,
+                                        (scale,) * len(truth), tuple(map(tuple, truth)))
+
+    def _measurement_report(self, results, notes, provenance, policy, scales, points):
+        if not isinstance(policy, TrustPolicy):
+            raise InvalidCalibrationInputError("trust_policy must be TrustPolicy")
+        if provenance is not None and not isinstance(provenance, MeasurementProvenance):
+            raise InvalidCalibrationInputError("provenance must be MeasurementProvenance")
+        report = ValidationReport(tuple(results), "measured", tuple(notes), self.profile.fingerprint(), provenance,
+                                  trust_policy=policy, reference_scales=scales, reference_points=points)
+        if provenance is not None:
+            object.__setattr__(report, "_signature", _report_signature(report))
+        return report

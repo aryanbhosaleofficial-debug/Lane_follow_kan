@@ -53,6 +53,16 @@ class ConsistencyTests(unittest.TestCase):
 
 
 class DistanceTests(unittest.TestCase):
+    def test_fit_mark_pair_is_circular_evidence(self):
+        profile = PROFILE
+        fit = profile.road_plane
+        a, b = fit.image_points_raw_px[[0, 1]]
+        length = float(np.linalg.norm(fit.ground_points_m[0] - fit.ground_points_m[1]))
+        report = CalibrationValidator(profile).check_distances(
+            [DistanceMeasurement(tuple(a), tuple(b), length)], 0.001)
+        self.assertFalse(report.passed)
+        self.assertIn("circular evidence", report.results[0].detail)
+
     def test_exact_reference_lengths_pass(self):
         (a, b, c, d) = px([1.0, -0.25], [1.0, 0.25], [0.8, 0.0], [1.5, 0.0])
         report = VALIDATOR.check_distances([DistanceMeasurement(a, b, 0.50, "lane width"),

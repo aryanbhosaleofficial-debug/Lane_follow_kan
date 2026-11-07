@@ -6,8 +6,9 @@ homography is only valid together with the ``K_new`` it was estimated for.
 
 Cropping is explicit: ``alpha=0`` keeps only valid pixels (the image is zoomed so no black border
 remains, discarding some of the field of view), ``alpha=1`` keeps every source pixel (black
-borders appear), ``alpha=None`` keeps ``K_new = K`` (no zoom, black borders for barrel
-distortion). Output size always equals the input size.
+borders appear), ``alpha=None`` keeps ``K_new = K`` (no zoom; black borders appear for pincushion
+distortion, whereas for barrel distortion every output pixel is sourced -- measured valid fraction 1.0 at k1 = -0.28 -- and
+the outer part of the field of view falls outside the output). Output size always equals the input size.
 """
 from __future__ import annotations
 

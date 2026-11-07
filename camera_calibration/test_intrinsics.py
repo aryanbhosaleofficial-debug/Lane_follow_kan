@@ -4,6 +4,7 @@ import math
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -203,6 +204,19 @@ class CalibrationFromDetectionsTests(unittest.TestCase):
         self.assertAlmostEqual(res.intrinsics.rms_reprojection_px,
                                math.sqrt(np.mean(np.square(res.intrinsics.per_view_rms_px))), delta=1e-9)
 
+    def test_overfitted_coefficients_are_a_quality_rejection_not_bad_input(self):
+        # An over-fitted rational8 solve can return |coefficient| > 1e4. That must surface as a quality rejection
+        # (a calibration that ran but is unusable), not as InvalidCalibrationInputError (the caller's input was fine).
+        calibrator = IntrinsicCalibrator(config())
+        real = calibrator._run_opencv
+
+        def inflated(*args):
+            K, D, rvecs, tvecs = real(*args)
+            D = D.copy(); D[0] = 5e4
+            return K, D, rvecs, tvecs
+        with patch.object(calibrator, "_run_opencv", inflated), self.assertRaisesRegex(CalibrationQualityError, "over-fitted"):
+            calibrator.calibrate_from_detections(detections_for(STD_CAMERA, 12, seed=9), (640, 480))
+
     def test_quality_metrics_reported(self):
         _, res = self.results["standard5"]
         for key in ("rms_px", "orientation_spread_deg", "coverage_fraction", "max_roundtrip_error_px"):
@@ -213,6 +227,18 @@ class CalibrationFromDetectionsTests(unittest.TestCase):
     def test_too_few_views_is_an_error(self):
         with self.assertRaisesRegex(InsufficientCalibrationDataError, "min_views"):
             IntrinsicCalibrator(config(min_views=10)).calibrate_from_detections(detections_for(STD_CAMERA, 6), (640, 480))
+
+    def test_repeated_board_view_is_rejected(self):
+        dets = detections_for(STD_CAMERA, 10)
+        dets[3] = ("repeated", dets[0][1].copy())
+        with self.assertRaisesRegex(InvalidCalibrationInputError, "repeat nearly the same board position"):
+            IntrinsicCalibrator(config()).calibrate_from_detections(dets, (640, 480))
+
+    def test_bad_image_shape_and_calibration_size_fail_cleanly(self):
+        with self.assertRaises(InsufficientCalibrationDataError):
+            IntrinsicCalibrator(config()).calibrate_images([("bad", np.zeros((4, 4, 4), np.uint8))])
+        with self.assertRaisesRegex(InvalidCalibrationInputError, "image_size"):
+            IntrinsicCalibrator(config()).calibrate_from_detections([], (0, 480))
 
     def test_wrong_corner_count_is_rejected(self):
         dets = detections_for(STD_CAMERA, 10)

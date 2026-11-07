@@ -24,6 +24,7 @@ from camera_input import CameraConfig, CameraManager, CameraError
 from .pipeline import BEVProcessor, ProcessorConfig
 from .profile import CalibrationProfile
 from .status import CalibrationStatus
+from .validation import _looks_synthetic
 from . import diagnostics as diag
 
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv"}
@@ -97,7 +98,16 @@ def _panel(image: np.ndarray, size: tuple[int, int]) -> np.ndarray:
     return canvas
 
 
-def _verify_video(path: Path) -> int:
+def _provenance_lines(profile: CalibrationProfile) -> tuple[str, ...]:
+    """Caption lines naming the profile behind an UNVERIFIED metric BEV, so a metre grid is never read as a measurement."""
+    origin = (profile.road_plane.origin_description or "").strip() or "undocumented"
+    lines = [f"profile {profile.camera_id!r}", f"origin: {origin}"[:60]]
+    if _looks_synthetic(origin):
+        lines.append("SYNTHETIC GEOMETRY - NOT THIS CAMERA")
+    return tuple(lines)
+
+
+def _verify_video(path: Path, expected_size: tuple[int, int] | None = None) -> int:
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
         raise OSError(f"saved video cannot be reopened: {path}")
@@ -107,6 +117,8 @@ def _verify_video(path: Path) -> int:
             ok, frame = cap.read()
             if not ok: break
             if frame is None or frame.size == 0: raise OSError(f"invalid saved frame: {path}")
+            if expected_size is not None and (frame.shape[1], frame.shape[0]) != expected_size:
+                raise OSError(f"saved video has wrong frame size at frame {n + 1}: {path}")
             n += 1
     finally:
         cap.release()
@@ -150,6 +162,7 @@ def process_video(video: Path, output: Path, *, profile_path: Path | None = None
         profile.check_compatibility(info["width"], info["height"], str(video.resolve()))
         processor = BEVProcessor(profile, ProcessorConfig(max_frame_age_s=None))
         status = "METRIC_UNVERIFIED - requires independent physical validation"
+        output_label = "UNVERIFIED METRIC BEV"
         engine = "M02 BEVProcessor (fused undistortion + road-plane remap)"
         output_size = (profile.bev.width_px, profile.bev.height_px)
     else:
@@ -157,6 +170,7 @@ def process_video(video: Path, output: Path, *, profile_path: Path | None = None
             raise ValueError("pixel demonstration requires an explicit --quad; metric profile requires --profile")
         H = pixel_demo_matrix(quad, info["width"], info["height"], output_size)
         status = "PIXEL DEMO - NO METRIC SCALE OR UNDISTORTION"
+        output_label = "PIXEL-SPACE PERSPECTIVE DEMONSTRATION"
         engine = "cv2.warpPerspective of a hand-picked quad (M02 runtime NOT used)"
         pixel_mask = cv2.warpPerspective(np.full((info["height"], info["width"]), 255, np.uint8), H, output_size, flags=cv2.INTER_NEAREST)
     map_initialization_ms = (time.perf_counter() - map_start) * 1000
@@ -165,7 +179,7 @@ def process_video(video: Path, output: Path, *, profile_path: Path | None = None
     try:
         for attempt in range(1, START_ATTEMPTS + 1):
             try:
-                metrics = _run(video, output, info, processor, H, pixel_mask, quad, output_size, limit, pace, status, engine, map_initialization_ms)
+                metrics = _run(video, output, info, processor, H, pixel_mask, quad, output_size, limit, pace, status, output_label, engine, map_initialization_ms)
                 break
             except _FirstFramesLost as exc:
                 if attempt == START_ATTEMPTS:
@@ -180,11 +194,12 @@ def process_video(video: Path, output: Path, *, profile_path: Path | None = None
     return metrics
 
 
-def _run(video, output, info, processor, H, pixel_mask, quad, output_size, limit, pace, status, engine, map_initialization_ms) -> dict:
+def _run(video, output, info, processor, H, pixel_mask, quad, output_size, limit, pace, status, output_label, engine, map_initialization_ms) -> dict:
     ow, oh = output_size
     fps = info["fps_reported"] if 0 < info["fps_reported"] <= 240 else 24.0
     expected = min(limit, info["frames_reported"]) if limit else info["frames_reported"]
     samples_at = _sample_positions(expected)
+    caption = _provenance_lines(processor.profile) if processor is not None else ()
     writers = {}
     timings, encode_timings, wait_timings, frame_ids, ages, session_ids = [], [], [], [], [], set()
     decoded, first_ns = 0, time.perf_counter_ns()
@@ -236,8 +251,12 @@ def _run(video, output, info, processor, H, pixel_mask, quad, output_size, limit
                 original = _panel(source_overlay, output_size)
                 comparison = np.concatenate((original, bev_overlay), axis=1)
                 cv2.putText(comparison, f"Original | frame {packet.frame_id}", (12, 25), cv2.FONT_HERSHEY_SIMPLEX, .6, (0, 255, 255), 1)
-                title = "Metric BEV" if processor is not None else "Perspective demo"
-                cv2.putText(comparison, f"{title} | {status}", (ow + 12, 25), cv2.FONT_HERSHEY_SIMPLEX, .45, (0, 255, 255), 1)
+                cv2.putText(comparison, output_label, (ow + 12, 25), cv2.FONT_HERSHEY_SIMPLEX, .45, (0, 255, 255), 1)
+                for row, line in enumerate(caption):
+                    cv2.putText(comparison, line, (ow + 12, 44 + 16 * row), cv2.FONT_HERSHEY_SIMPLEX, .4, (0, 255, 255), 1)
+                if processor is not None:
+                    cv2.putText(comparison, "ref points / labels: stored profile values, UNVERIFIED", (12, oh - 12),
+                                cv2.FONT_HERSHEY_SIMPLEX, .42, (0, 255, 255), 1)
                 mask_view = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
                 coverage = float(np.count_nonzero(mask)) / mask.size
                 cv2.putText(mask_view, f"Source coverage {coverage:.1%}", (12, 25), cv2.FONT_HERSHEY_SIMPLEX, .55, (0, 255, 255), 1)
@@ -256,6 +275,8 @@ def _run(video, output, info, processor, H, pixel_mask, quad, output_size, limit
                 last_id, session = packet.frame_id, packet.session_id
                 metadata_file.write(json.dumps({"frame_id": packet.frame_id, "session_id": packet.session_id,
                                                 "source_id": packet.source_id,
+                                                "calibration_state": (bev.calibration_status.value if processor else CalibrationStatus.PIXEL_ONLY.value),
+                                                "profile_fingerprint": (bev.profile_fingerprint if processor else None),
                                                 "acquired_unix_ns": packet.acquired_unix_ns,
                                                 "acquired_monotonic_ns": packet.acquired_monotonic_ns,
                                                 "presentation_ms": packet.presentation_ms,
@@ -264,15 +285,21 @@ def _run(video, output, info, processor, H, pixel_mask, quad, output_size, limit
             state = camera.status()
             if limit is None and state["state"] != "eof":
                 raise RuntimeError(f"processing stopped before clean EOF: {state['state']}: {state['last_error']}")
+            if expected > 0 and decoded != expected:
+                raise RuntimeError(f"incomplete export: processed {decoded} of {expected} expected frames")
     finally:
         for writer in writers.values(): writer.release()
         current, peak = tracemalloc.get_traced_memory(); tracemalloc.stop()
     elapsed = (time.perf_counter_ns() - first_ns) / 1e9
-    verified = {name: _verify_video(output / name) for name in writers}
+    verified = {name: _verify_video(output / name, ((2 * ow, oh) if name == "original_vs_bev.mp4" else (ow, oh)))
+                for name in writers}
     if any(n != decoded for n in verified.values()):
         raise RuntimeError(f"saved-video frame count mismatch: processed {decoded}, decoded {verified}")
     skipped = (frame_ids[0] - 1 if frame_ids else 0) + sum(b - a - 1 for a, b in zip(frame_ids, frame_ids[1:]))
-    metrics = {"input": info, "calibration_status": status,
+    metrics = {"input": info, "calibration_status": status, "output_label": output_label,
+               "partial_export": limit is not None, "frame_limit": limit,
+               "profile_camera_id": processor.profile.camera_id if processor else None,
+               "profile_origin_description": processor.profile.road_plane.origin_description if processor else None,
                "calibration_state": (processor.calibration_status.value if processor else CalibrationStatus.PIXEL_ONLY.value),
                "profile_fingerprint": processor.profile.fingerprint() if processor else None,
                "transform_engine": engine, "frames_processed": decoded,
@@ -282,6 +309,7 @@ def _run(video, output, info, processor, H, pixel_mask, quad, output_size, limit
                "transform_mean_ms": statistics.mean(timings) * 1000 if timings else None,
                "transform_median_ms": statistics.median(timings) * 1000 if timings else None,
                "transform_p95_ms": sorted(timings)[int(.95 * (len(timings) - 1))] * 1000 if timings else None,
+               "transform_p99_ms": sorted(timings)[int(.99 * (len(timings) - 1))] * 1000 if timings else None,
                "transform_max_ms": max(timings) * 1000 if timings else None,
                "map_initialization_ms": map_initialization_ms,
                "m01_wait_total_s": sum(wait_timings), "encode_total_s": sum(encode_timings), "pipeline_elapsed_s": elapsed,

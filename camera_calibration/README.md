@@ -4,8 +4,9 @@ Turns the frames M01 publishes into a **metric bird's-eye view (BEV)** of the ro
 homography calibrated from your own measurements, and a precomputed one-pass remap for runtime. It does **no** lane detection,
 obstacle detection or control.
 
-> **Status: software complete and verified on synthetic data only.** Nothing here has been run against a real camera, a real
-> track, or a Raspberry Pi 5. Real-camera accuracy and Pi 5 speed need separate hardware validation (checklist at the end).
+> **Status: software verified on synthetic data and the recorded `videos/test.mp4`.** The recording has no measured
+> ground references or checkerboard sequence. Physical metric accuracy, a mounted live camera, and Raspberry Pi 5 speed
+> need separate hardware validation (checklist at the end).
 > The `lane_detection/ipm_*` prototype and `calibration/ipm_calibration.json` are untouched; that JSON is pixel-space only
 > (`physical_scale: null`) and cannot be converted into an M02 profile, because metric scale needs measured ground points.
 
@@ -159,8 +160,9 @@ terminal camera error. M01 absent? Any object with the documented `FramePacket` 
 
 **`BEVFrame` contract for downstream modules**
 * `image` - `(H, W, 3)` uint8 BGR, **read-only**. Meaningful only where `valid_mask == 255`; other pixels hold `border_value` and are **not road**.
-* `valid_mask` - 255 where the camera observed that ground point. `support_mask` - observed **and** inside the calibrated region (+ `support_margin_m`);
-  pixels observed but not supported are extrapolated and less accurate.
+* `valid_mask` - 255 where the ground point **projects inside the camera image** (geometric visibility only). It does **not** detect occlusion: ground hidden behind
+  a vehicle, cone or wall still counts as "observed", and the raised object itself is smeared onto the ground behind it. Never read it as "free road" or "drivable".
+  `support_mask` - valid **and** inside the calibrated region (+ `support_margin_m`); pixels valid but not supported are extrapolated and less accurate.
 * Identity: `key == (source_session_id, source_frame_id)` is unambiguous (frame ids are monotonic across sessions in M01, but use both). `source_id`,
   `acquired_unix_ns`, `acquired_monotonic_ns`, `source_width/height`, `source_presentation_ms` are M01's values **unchanged**.
 * `bev_sequence` increments only when a **new** source frame was processed; processing the same `(session, frame)` again returns the cached object. Equal
@@ -168,7 +170,8 @@ terminal camera error. M01 absent? Any object with the documented `FramePacket` 
 * `source_frames_skipped` - frames M01 published between the previous processed frame and this one (same session; `None` across sessions). Use it for dt-aware filters.
 * `age_seconds()` - seconds since M01 **acquired** the frame (software age). It does not include sensor exposure, USB or driver latency.
 * `processed_monotonic_ns`, `processing_seconds` - M02's own timing. `profile_fingerprint` - which calibration produced it. `notes` - e.g. "profile rescaled".
-* `geometry` - the conversions below, bound to this frame's grid. `undistorted_image` only with `ProcessorConfig(include_undistorted=True)`.
+* `geometry` - the conversions below, bound to this frame's grid. **It returns profile metres on every frame, including `METRIC_UNVERIFIED` ones; use
+  `validated_geometry()` when a consumer must not act on unverified distances.** `undistorted_image` only with `ProcessorConfig(include_undistorted=True)`.
 * Arrays are **shared and read-only**; copy (`.copy()`) before modifying. M02 never modifies M01's arrays.
   **Warning - OpenCV 4.x:** the read-only flag stops NumPy writes on every version, but on OpenCV **4.8** `cv2.line`, `cv2.rectangle` and `cv2.putText` **silently draw
   into read-only arrays** (verified; OpenCV 5.0 raises instead). The same applies to M01's `FramePacket.image`. Any module that draws overlays must draw on a copy
@@ -244,7 +247,9 @@ On the vehicle / Raspberry Pi 5, camera mounted, vehicle safely stationary:
 1. Intrinsics from >= 15 varied chessboard images at the runtime resolution; confirm RMS, coverage, spread and the corner-0 overlays.
 2. Road-plane calibration with >= 6 measured marks plus >= 4 **independent** held-out marks; confirm `check-distances` within a tolerance you choose, and the camera-height cross-check.
 3. Check straight real road features are straight and parallel in the BEV and curved ones keep their measured radius.
-4. Run `live` / `BEVWorker` for an extended period: measure BEV latency, `age_seconds()` p95, CPU, memory and temperature on the Pi 5; compare `fixed_point_maps` True/False.
+4. Run `live` / `BEVWorker` for an extended period: measure actual camera FPS, BEV latency (median/P95/P99/max),
+   `age_seconds()` P95, CPU use, resident memory, temperature and throttling state on the Pi 5;
+   compare `fixed_point_maps` True/False with the same camera mode and BEV grid.
 5. Exercise source switches, unplug/replug and a camera restart; confirm no stale BEV is ever used.
 6. Re-verify after any vibration test or re-mounting; define the recalibration trigger for your vehicle.
 
@@ -300,9 +305,32 @@ metric-remap performance on the current computer.
 
 ## Corrective review: trust states and real-video limits
 
+Runtime acceptance uses `TrustPolicy(min_references=3, max_tolerance_m=0.05,
+max_relative_error=0.10)`. These defaults are project screening choices, not universal physical
+limits. Select and record criteria from the required track accuracy and measurement uncertainty.
+**The consumer decides acceptance:** `BEVProcessor(profile, validation_report=report, trust_policy=TrustPolicy(...))`
+judges the report against ITS policy (default `TrustPolicy()`), and every frame's `validated_geometry()`
+re-checks that same policy. The policy a report's producer passes to `check_distances` /
+`check_held_out_points` is recorded and signed for the audit trail but does not lower the bar the
+processor applies; a producer-side loose policy (e.g. 99% relative error) therefore cannot grant `VALID_METRIC`.
+At the default policy a trusted frame still tolerates up to about 10% distance error (about 24 mm on a
+0.30 m lane); tighten it if the downstream use needs less. Distances use measured length as the relative scale;
+held-out positions use the calibrated hull diameter. Both the actual error and the selected
+tolerance must satisfy the relative bound. Repeated references are rejected, and trusted
+references must span two ground dimensions and at least `min_span_fraction=0.10` of each
+calibrated axis range by default; this fraction is also configurable. More references and coverage throughout the
+operating region remain necessary for a convincing physical assessment.
+
+Repository CI is configured in `.github/workflows/m01_m02_tests.yml`. One discovery run includes
+M01, M02 and legacy IPM tests; the real-video asset file is run explicitly because its historical
+name does not match discovery. Local execution does not establish a successful GitHub Actions run.
+
 `BEVFrame.calibration_status` is `METRIC_UNVERIFIED` by default even when a profile contains metres.
 It becomes `VALID_METRIC` only when `BEVProcessor(profile, validation_report=report)` receives a
-passing **measured** `CalibrationValidator` report bound to that exact profile fingerprint.
+passing, operator-attested **measured** `CalibrationValidator` report issued in the current process
+and bound to that exact non-synthetic profile fingerprint. A report built directly from summary
+fields, loaded from JSON, altered after checking, or derived from the bundled synthetic profile
+cannot grant trust. Explicit uniform profile rescaling downgrades the frame to `METRIC_UNVERIFIED`.
 `bev.validated_geometry()` raises `ProfileError` otherwise. The older `bev.geometry` attribute
 remains for compatibility; any coordinates it returns are profile coordinates and must not be
 used as physical truth without independent validation. The video exporter reports `PIXEL_ONLY`
@@ -323,10 +351,33 @@ python -m camera_calibration.pose_diagnostics --video videos/test.mp4 --out outp
 ```
 
 Inspect the report, reference-point overlay and metric grid against independent ruler
-measurements. The tolerance is an operator decision. A saved report records a profile fingerprint
-and errors but cannot prove the operator truly measured independent points. Once valid measured
-references exist, create a report in Python using `CalibrationValidator(profile).check_distances(...)`
-and pass it to `BEVProcessor`. A synthetic or self-consistency report is not physical evidence.
+measurements. The tolerance is an operator decision. A saved CLI report records a profile fingerprint
+and errors for review; it cannot grant trusted geometry or prove the operator truly measured independent
+points. Once valid measured references exist, create the runtime report from the same recorded inputs:
+
+```python
+from camera_calibration import (BEVProcessor, CalibrationProfile, CalibrationValidator, DistanceMeasurement,
+                                MeasurementProvenance)
+
+profile = CalibrationProfile.load("vehicle_metric.json")
+evidence = MeasurementProvenance(operator="operator name", method="tape measure",
+                                  reference="dated measurement log / target ID",
+                                  independent_from_fit=True)
+measurements = [DistanceMeasurement((420.0, 350.0), (600.0, 350.0), 0.50)]  # replace with actual records
+report = CalibrationValidator(profile).check_distances(measurements, tolerance_m=0.01,
+                                                        provenance=evidence)
+processor = BEVProcessor(profile, validation_report=report)
+# frame = processor.process(packet); trusted = frame.validated_geometry()
+```
+
+The example numbers are placeholders; replace every point and distance with independently recorded
+ground-plane measurements, and supply at least `validation.MIN_TRUSTED_REFERENCES` (3) of them, each judged
+against a tolerance of at most `validation.MAX_TRUSTED_TOLERANCE_M` (0.05 m); a report with fewer references or a
+looser tolerance passes `report.passed` but is **not** trusted. Profiles whose origin text names them synthetic,
+simulated, placeholder, fake, mock or dummy (letters-only match) are never trusted; this is a screening heuristic,
+not proof. `report.passed` alone does not imply trusted physical geometry.
+Software can reject circular fit points, incompatible profiles and altered reports, but cannot
+authenticate a person's measurement or prove that the camera mounting stayed fixed.
 
 The pose diagnostic samples frames and reports ORB match counts. On moving-vehicle footage,
 feature motion is ambiguous and the conclusion is `INCONCLUSIVE_FOR_MOUNTING_STABILITY`. With a
@@ -349,3 +400,10 @@ Repository-wide discovery now includes the three lane IPM tests; run
 Hardware checks remain **NOT RUN**: measure real-camera frame age/FPS and M02 p50/p95/p99 latency,
 CPU, native/Python memory and temperature on the Raspberry Pi 5; verify resolution changes,
 source switches, restart, vibration/re-mounting, and an extended run before vehicle use.
+
+Recorded-video verification on this Windows checkout: `videos/test.mp4` is 864x496 at about
+23.998 FPS with 590 decodable frames. A full pixel-space export processed IDs 1..590 with zero
+skipped IDs and clean EOF; all four exported videos reopened with 590 frames. A separate 60-frame
+run through M02 used `calibration/test_video_metric_profile.json`, which is synthetic and therefore
+`METRIC_UNVERIFIED`. The pose diagnostic returned `INCONCLUSIVE_FOR_MOUNTING_STABILITY`.
+These results verify plumbing and export integrity, not physical BEV accuracy.

@@ -130,6 +130,24 @@ class MalformedProfileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, self.assertRaises(ProfileError):
             CalibrationProfile.load(tmp)                    # a directory is not a profile
 
+    def test_deeply_nested_json_is_a_profile_error_not_a_crash(self):
+        # 200 KB, far below the size limit, but it overflows the JSON decoder's stack (RecursionError, not ValueError)
+        with self.assertRaisesRegex(ProfileError, "nested too deeply"):
+            self.load_text("", raw=b"[" * 100_000 + b"]" * 100_000)
+
+    def test_axis_convention_markers_are_checked_on_load(self):
+        d = self.mutated(lambda d: d["road_plane"].__setitem__("homography_maps", "raw pixels -> ground"))
+        with self.assertRaisesRegex(ProfileError, "homography_maps"):
+            CalibrationProfile.from_dict(d)
+        d = self.mutated(lambda d: d["road_plane"].__setitem__("frame", "X right, Y forward, Z down; metres"))
+        with self.assertRaisesRegex(ProfileError, "road_plane.frame"):
+            CalibrationProfile.from_dict(d)
+        d = self.mutated(lambda d: d["bev"].__setitem__("convention", "u left, v up"))
+        with self.assertRaisesRegex(ProfileError, "bev.convention"):
+            CalibrationProfile.from_dict(d)
+        self.assertEqual(CalibrationProfile.from_dict(copy.deepcopy(self.good)).fingerprint(),
+                         CalibrationProfile.from_dict(self.good).fingerprint())    # an untouched profile still loads
+
     def test_non_finite_values_hidden_in_valid_json_are_rejected(self):
         d = self.mutated(lambda d: d["intrinsics"]["camera_matrix"][0].__setitem__(0, 1e999))   # becomes inf on load
         with self.assertRaises(ProfileError):

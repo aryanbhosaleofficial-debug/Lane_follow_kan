@@ -321,7 +321,17 @@ class RoadPlaneCalibrator:
         """
         from .roadplane import points_in_convex_polygon
         raw, und, ground = self._prepare(image_points_px, ground_points_m, points_space)
+        if (calibration.image_size != self.intrinsics.image_size
+                or not np.allclose(calibration.undistorted_camera_matrix, self.undistortion.camera_matrix,
+                                   rtol=1e-9, atol=1e-9)):
+            raise InvalidCalibrationInputError("held-out validation uses a different camera resolution or undistortion matrix")
+        if len(ground) == 0:
+            raise InvalidCalibrationInputError("provide independent held-out points")
+        if np.any(np.linalg.norm(ground[:, None, :] - calibration.ground_points_m[None, :, :], axis=2) < 1e-6):
+            raise InvalidCalibrationInputError("held-out points repeat calibration points")
         pred, valid = apply_homography(np.linalg.inv(calibration.homography), und, require_positive_w=False)
+        if not valid.all():
+            raise DegenerateGeometryError("a held-out point projects at infinity; check correspondences and the calibration region")
         err = np.linalg.norm(pred - ground, axis=1)
         return {"errors_m": err.tolist(), "rms_m": float(np.sqrt(np.nanmean(err ** 2))), "max_m": float(np.nanmax(err)),
                 "inside_calibrated_hull": points_in_convex_polygon(ground, calibration.calibrated_hull_m).tolist(),

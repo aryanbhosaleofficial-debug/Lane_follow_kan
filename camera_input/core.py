@@ -8,7 +8,7 @@ import threading
 import time
 import uuid
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any, Callable
 
 log = logging.getLogger(__name__)
@@ -75,6 +75,14 @@ class CameraConfig:
             raise ValueError('backoff_factor must be finite and at least 1')
         if not isinstance(self.pace_video, bool):
             raise ValueError('pace_video must be a boolean')
+
+    def __repr__(self):
+        # The generated dataclass repr would print URL credentials (rtsp://user:pass@host); every other M01 surface redacts them.
+        parts = []
+        for f in fields(self):
+            value = getattr(self, f.name)
+            parts.append(f'{f.name}={(redact_source(value) if isinstance(value, str) else value)!r}' if f.name == 'source' else f'{f.name}={value!r}')
+        return f'CameraConfig({", ".join(parts)})'
 
 @dataclass(frozen=True)
 class FramePacket:

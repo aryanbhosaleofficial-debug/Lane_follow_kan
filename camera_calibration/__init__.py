@@ -28,7 +28,7 @@ from .plane_calibration import RoadPlaneCalibrator, RoadPlaneConfig
 from .profile import CalibrationProfile, new_profile
 from .roadplane import RoadPlaneCalibration
 from .undistort import Undistorter, UndistortionSpec
-from .validation import CalibrationValidator, DistanceMeasurement, ValidationReport
+from .validation import CalibrationValidator, DistanceMeasurement, MeasurementProvenance, TrustPolicy, ValidationReport
 from .status import CalibrationStatus
 
 __all__ = [
@@ -38,6 +38,6 @@ __all__ = [
     "IntrinsicCalibrator", "IntrinsicParameters", "IntrinsicQuality", "InvalidBEVRegionError", "InvalidCalibrationInputError",
     "InvalidFrameError", "ManagerFrameSource", "ProcessorConfig", "ProfileError", "ResolutionMismatchError", "RoadPlaneCalibration",
     "RoadPlaneCalibrator", "RoadPlaneConfig", "SourceMismatchError", "StaleFrameError", "Undistorter", "UndistortionSpec",
-    "ValidationReport", "new_profile",
+    "ValidationReport", "MeasurementProvenance", "TrustPolicy", "new_profile",
     "CalibrationStatus",
 ]

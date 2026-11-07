@@ -1,0 +1,24 @@
+name: M01 and M02 tests
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      # Discovery includes M01, M02 and legacy lane IPM regressions once.
+      - name: Repository tests (M01, M02, legacy IPM)
+        run: python -m unittest discover -v
+      # The historical filename does not match test*.py, so run it explicitly.
+      - name: Recorded project video integration
+        run: python -m unittest camera_calibration.video_asset_tests -v

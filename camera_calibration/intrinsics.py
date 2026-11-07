@@ -28,6 +28,8 @@ log = logging.getLogger(__name__)
 #: model name -> number of distortion coefficients
 DISTORTION_MODELS: dict[str, int] = {"radial2": 5, "standard5": 5, "rational8": 8, "fisheye": 4}
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
+#: Larger distortion coefficients cannot describe a real lens: an over-fitted solve (typically ``rational8``).
+MAX_ABS_DISTORTION_COEFFICIENT = 1e4
 _UNDISTORT_CRITERIA = (cv2.TERM_CRITERIA_COUNT + cv2.TERM_CRITERIA_EPS, UNDISTORT_ITERATIONS, UNDISTORT_EPSILON)
 
 
@@ -119,7 +121,7 @@ class IntrinsicParameters:
             raise InvalidCalibrationInputError("camera matrix must have the form [[fx,0,cx],[0,fy,cy],[0,0,1]] (zero skew)")
         if not (0 <= K[0, 2] <= self.image_width and 0 <= K[1, 2] <= self.image_height):
             raise InvalidCalibrationInputError("principal point lies outside the image")
-        if np.abs(D).max() > 1e4:
+        if np.abs(D).max() > MAX_ABS_DISTORTION_COEFFICIENT:
             raise InvalidCalibrationInputError("distortion coefficients are implausibly large")
         object.__setattr__(self, "camera_matrix", K)
         object.__setattr__(self, "dist_coeffs", D)
@@ -411,6 +413,10 @@ class IntrinsicCalibrator:
             if img is None:
                 rejected.append(ViewRecord(name, False, "unreadable or empty image"))
                 continue
+            if (not isinstance(img, np.ndarray) or img.dtype != np.uint8 or img.size == 0
+                    or img.ndim not in (2, 3) or (img.ndim == 3 and img.shape[2] != 3)):
+                rejected.append(ViewRecord(name, False, "expected non-empty uint8 grayscale or BGR image"))
+                continue
             if img.ndim == 3:
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             this = (int(img.shape[1]), int(img.shape[0]))
@@ -436,6 +442,9 @@ class IntrinsicCalibrator:
     def calibrate_from_detections(self, detections: Sequence[tuple[str, np.ndarray]], image_size: tuple[int, int],
                                   rejected_views: Sequence[ViewRecord] = ()) -> IntrinsicCalibrationResult:
         cfg = self.config
+        if (not isinstance(image_size, (tuple, list)) or len(image_size) != 2
+                or not all(is_positive_int(v) for v in image_size)):
+            raise InvalidCalibrationInputError("image_size must be (width, height) positive integers")
         width, height = int(image_size[0]), int(image_size[1])
         if cfg.expected_image_size is not None and (width, height) != tuple(cfg.expected_image_size):
             raise InvalidCalibrationInputError(f"image size {width}x{height} differs from expected {cfg.expected_image_size}")
@@ -446,6 +455,11 @@ class IntrinsicCalibrator:
             if arr.shape[0] != n_points or not np.isfinite(arr).all():
                 raise InvalidCalibrationInputError(f"{name}: expected {n_points} finite corners, got shape {arr.shape}")
             names.append(name); corner_sets.append(arr)
+        for i, first in enumerate(corner_sets):
+            for j in range(i + 1, len(corner_sets)):
+                if float(np.median(np.linalg.norm(first - corner_sets[j], axis=1))) < 0.5:
+                    raise InvalidCalibrationInputError(
+                        f"views {names[i]!r} and {names[j]!r} repeat nearly the same board position; capture varied views")
         if len(corner_sets) < cfg.min_views:
             raise InsufficientCalibrationDataError(
                 f"{len(corner_sets)} usable view(s) found but min_views={cfg.min_views}; "
@@ -453,6 +467,10 @@ class IntrinsicCalibrator:
 
         obj = chessboard_object_points(cfg.pattern_size, cfg.square_size_m)
         K, D, rvecs, tvecs = self._run_opencv(obj, corner_sets, (width, height))
+        if np.abs(D).max() > MAX_ABS_DISTORTION_COEFFICIENT:
+            raise CalibrationQualityError(
+                f"intrinsic calibration rejected: distortion coefficients up to {np.abs(D).max():.3g} are implausible, so the "
+                f"{cfg.model!r} model is over-fitted to these views; use a simpler model or more varied views")
 
         # Own reprojection error (authoritative; OpenCV's own figure is cross-checked in the tests).
         per_view = []

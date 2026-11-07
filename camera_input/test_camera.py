@@ -15,6 +15,15 @@ class FakeCapture:
     def release(self): self.closed = True
 
 class CameraTests(unittest.TestCase):
+    def test_config_repr_never_prints_url_credentials(self):
+        # M01M02-SONNET-005: the generated dataclass repr leaked rtsp://user:password@host into logs and exception text.
+        config = CameraConfig(source='rtsp://admin:hunter2@10.0.0.5/stream')
+        for text in (repr(config), str(config), f'{config}', f'{config!r}'):
+            self.assertNotIn('hunter2', text)
+            self.assertNotIn('admin', text)
+            self.assertIn('rtsp://***@10.0.0.5/stream', text)
+        self.assertIn('source=0', repr(CameraConfig(source=0)))                      # integer indexes stay readable
+        self.assertEqual(config.source, 'rtsp://admin:hunter2@10.0.0.5/stream')      # the real source is still used to open the stream
     def test_config(self):
         for kw in ({'width': 0, 'height': 2}, {'fps': -1}, {'retries': -1}, {'resize': (0, 2)}):
             with self.assertRaises(ValueError): CameraConfig(**kw)

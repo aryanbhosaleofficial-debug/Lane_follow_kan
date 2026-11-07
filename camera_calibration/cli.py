@@ -289,13 +289,19 @@ def cmd_check_distances(args: argparse.Namespace) -> int:
                                          e["distance_m"], str(e.get("label", "")), bool(e.get("undistorted", False))))
     report = CalibrationValidator(profile).check_distances(items, args.tolerance_m)
     print(report)
+    print("note: this CLI result is a review record; it cannot make a frame VALID_METRIC (see the README trust model)")
     if args.report_out:
         report_path = Path(args.report_out)
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps({
             "profile_fingerprint": report.profile_fingerprint,
+            "profile_camera_id": profile.camera_id,
+            "profile_origin_description": profile.road_plane.origin_description,
             "evidence": report.evidence,
             "passed": report.passed,
+            "grants_trusted_geometry": False,
+            "trust_note": ("This file is a review record only. VALID_METRIC requires a fresh in-process "
+                           "CalibrationValidator report with MeasurementProvenance passed to BEVProcessor."),
             "tolerance_m": args.tolerance_m,
             "results": [{"name": r.name, "passed": r.passed, "error_m": r.value if math.isfinite(r.value) else None,
                          "limit_m": r.limit, "detail": r.detail} for r in report.results],

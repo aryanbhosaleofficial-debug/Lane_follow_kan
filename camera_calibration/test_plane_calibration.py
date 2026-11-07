@@ -189,6 +189,16 @@ class NoisyFitTests(unittest.TestCase):
 
 
 class RejectionTests(unittest.TestCase):
+    def test_held_out_validation_rejects_fit_points_and_mixed_camera(self):
+        fit = calibrator().estimate(pixels(), GROUND)
+        with self.assertRaisesRegex(InvalidCalibrationInputError, "repeat calibration points"):
+            calibrator().validate(fit, pixels(ground=GROUND[:1]), GROUND[:1])
+        other = SyntheticCamera(fx=700.0)
+        other_intr = other.intrinsics()
+        wrong = RoadPlaneCalibrator(other_intr, UndistortionSpec.from_intrinsics(other_intr))
+        with self.assertRaisesRegex(InvalidCalibrationInputError, "different camera"):
+            wrong.validate(fit, pixels(ground=HELD_OUT[:1]), HELD_OUT[:1])
+
     def test_too_few_points(self):
         with self.assertRaises(InsufficientCalibrationDataError):
             calibrator().estimate(pixels(ground=GROUND[:3]), GROUND[:3])

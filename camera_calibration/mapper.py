@@ -308,6 +308,7 @@ class BEVMapper:
     def __init__(self, profile: CalibrationProfile):
         profile.require_metric()
         self.profile = profile
+        self.profile_fingerprint = profile.fingerprint()       # computed once: hashing the profile per frame doubled process() cost
         self.geometry = CameraGeometry(profile, require_bev=True)
         self.bev: BEVConfig = profile.bev                      # type: ignore[assignment]
         self._flag = INTERPOLATIONS[self.bev.interpolation]

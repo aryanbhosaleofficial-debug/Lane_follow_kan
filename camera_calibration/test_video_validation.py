@@ -81,6 +81,34 @@ class VideoValidationTests(unittest.TestCase):
         src.release(); bev.release()
         self.assertNotIn("M02 runtime NOT used", json.dumps(result))
 
+    def test_partial_export_is_declared_in_the_metrics(self):
+        full = process_video(self.video, self.root / "full", quad=self.quad, output_size=(64, 48))
+        part = process_video(self.video, self.root / "part", quad=self.quad, output_size=(64, 48), limit=5)
+        self.assertEqual((full["partial_export"], full["frame_limit"]), (False, None))
+        self.assertEqual((part["partial_export"], part["frame_limit"]), (True, 5))
+        self.assertLess(part["frames_processed"], part["input"]["frames_reported"])
+
+    def test_metric_export_names_the_profile_and_flags_synthetic_geometry(self):
+        from unittest.mock import patch
+        import camera_calibration.video_validation as vv
+        from camera_calibration.test_bev import PROFILE
+        small = PROFILE.scaled_to(64, 48)                                    # origin text: SYNTHETIC
+        lines = vv._provenance_lines(small)
+        self.assertIn("SYNTHETIC GEOMETRY - NOT THIS CAMERA", lines)
+        self.assertTrue(any("origin: SYNTHETIC" in line for line in lines))
+        self.assertTrue(any(small.camera_id in line for line in lines))
+        path = small.save(self.root / "profile.json")
+        result = process_video(self.video, self.root / "with", profile_path=path)
+        self.assertEqual(result["profile_origin_description"], "SYNTHETIC")
+        self.assertEqual(result["profile_camera_id"], small.camera_id)
+        with patch.object(vv, "_provenance_lines", return_value=()):
+            process_video(self.video, self.root / "without", profile_path=path)
+        shown = cv2.imread(str(self.root / "with" / "sample_frames" / "frame_0001.jpg"))
+        bare = cv2.imread(str(self.root / "without" / "sample_frames" / "frame_0001.jpg"))
+        w = small.bev.width_px
+        caption_rows = np.abs(shown[40:100, w:].astype(np.int16) - bare[40:100, w:].astype(np.int16)).mean()
+        self.assertGreater(caption_rows, 1.0, "the provenance caption is not drawn on the exported frame")
+
     def test_pixel_mode_says_m02_runtime_was_not_used(self):
         result = process_video(self.video, self.root / "px", quad=self.quad, output_size=(64, 48), limit=3)
         self.assertIn("M02 runtime NOT used", result["transform_engine"])
@@ -171,6 +199,26 @@ class VideoValidationTests(unittest.TestCase):
         process_video(self.video, out, quad=self.quad, output_size=(64, 48))    # a later successful run clears the marker
         self.assertFalse((out / "RUN_INCOMPLETE.txt").exists())
         self.assertEqual(json.loads((out / "processing_metrics.json").read_text())["frames_processed"], 12)
+
+    def test_corrupt_or_wrong_size_export_is_rejected(self):
+        from camera_calibration.video_validation import _verify_video
+        bad = self.root / "corrupt.mp4"
+        bad.write_bytes(b"not an mp4")
+        with self.assertRaises(OSError):
+            _verify_video(bad)
+        with self.assertRaisesRegex(OSError, "wrong frame size"):
+            _verify_video(self.video, (65, 48))
+
+    def test_incomplete_export_is_marked(self):
+        from unittest.mock import patch
+        import camera_calibration.video_validation as vv
+        info = inspect_video(self.video)
+        info["frames_reported"] += 1
+        out = self.root / "short"
+        with patch.object(vv, "inspect_video", return_value=info), self.assertRaisesRegex(RuntimeError, "incomplete export"):
+            process_video(self.video, out, quad=self.quad, output_size=(64, 48))
+        self.assertFalse((out / "processing_metrics.json").exists())
+        self.assertTrue((out / "RUN_INCOMPLETE.txt").exists())
 
     def test_samples_are_spread_over_the_actual_length(self):
         from camera_calibration.video_validation import _sample_positions

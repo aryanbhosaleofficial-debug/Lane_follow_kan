@@ -134,6 +134,28 @@ class ProcessorMetadataTests(unittest.TestCase):
         self.assertEqual(self.proc.stats()["repeats"], 2)
         self.assertEqual(self.proc.stats()["processed"], 2)
 
+    def test_repeated_identity_with_changed_source_is_rejected(self):
+        self.proc.process(packet(frame_id=7, source="cam-a"))
+        with self.assertRaisesRegex(InvalidFrameError, "conflicting source"):
+            self.proc.process(packet(frame_id=7, source="cam-b"))
+
+    def test_frame_id_going_backwards_within_a_session_is_rejected(self):
+        self.proc.process(packet(frame_id=10, session="A"))
+        with self.assertRaisesRegex(InvalidFrameError, "backwards"):
+            self.proc.process(packet(frame_id=5, session="A"))
+        later = self.proc.process(packet(frame_id=11, session="A"))              # the stream carries on after a refused frame
+        self.assertEqual(later.source_frames_skipped, 0)
+        self.assertEqual(self.proc.stats()["errors_by_type"].get("InvalidFrameError"), 1)
+
+    def test_the_profile_is_not_hashed_for_every_frame(self):
+        from unittest.mock import patch
+        from camera_calibration.profile import CalibrationProfile
+        expected = self.proc.process(packet(frame_id=1)).profile_fingerprint
+        self.assertEqual(expected, self.proc.profile.fingerprint())
+        with patch.object(CalibrationProfile, "fingerprint", side_effect=AssertionError("fingerprint() called per frame")):
+            for fid in range(2, 8):
+                self.assertEqual(self.proc.process(packet(frame_id=fid)).profile_fingerprint, expected)
+
     def test_same_frame_id_in_a_new_session_is_a_new_frame(self):
         a = self.proc.process(packet(frame_id=5, session="A"))
         b = self.proc.process(packet(frame_id=5, session="B"))

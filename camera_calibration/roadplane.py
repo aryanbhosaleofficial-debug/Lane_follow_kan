@@ -184,6 +184,11 @@ class RoadPlaneCalibration:
         missing = [k for k in required if k not in data]
         if missing:
             raise ProfileError(f"road_plane missing fields: {missing}")
+        if "frame" in data and data["frame"] != GROUND_FRAME:      # a different axis convention must never load silently
+            raise ProfileError(f"road_plane.frame is {data['frame']!r}; this software only supports {GROUND_FRAME!r}")
+        expected_direction = "ground (x, y, 1) metres -> undistorted pixels (in undistorted_camera_matrix coordinates)"
+        if "homography_maps" in data and data["homography_maps"] != expected_direction:
+            raise ProfileError("road_plane.homography_maps must map ground metres to undistorted pixels")
         size = data["image_size"]
         if not isinstance(size, list) or len(size) != 2 or not all(isinstance(v, int) and not isinstance(v, bool) for v in size):
             raise ProfileError("road_plane.image_size must be [width, height] integers")

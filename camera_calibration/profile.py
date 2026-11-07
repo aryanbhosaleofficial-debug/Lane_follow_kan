@@ -285,6 +285,8 @@ class CalibrationProfile:
             raise ProfileError(f"profile {p} is not valid UTF-8: {exc}") from None
         except ValueError as exc:
             raise ProfileError(f"profile {p} is not valid JSON: {exc}") from None
+        except RecursionError:
+            raise ProfileError(f"profile {p} is nested too deeply to be a calibration profile") from None
         return cls.from_dict(data)
 
 
