@@ -45,4 +45,6 @@ logs/
 *.log
 output/
 runs/
+outputs/m02_video_validation/
+outputs/m02_video_review/
 

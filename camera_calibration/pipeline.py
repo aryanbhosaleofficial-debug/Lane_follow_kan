@@ -32,6 +32,8 @@ from .errors import (CalibrationError, FrameUnavailableError, InvalidCalibration
 from .mapper import BEVMapper, CameraGeometry
 from .profile import CalibrationProfile
 from .bev import BEVConfig
+from .status import CalibrationStatus
+from .validation import ValidationReport
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +78,13 @@ class BEVFrame:
     undistorted_image: np.ndarray | None = None
     notes: tuple[str, ...] = ()
     pixel_format: str = "BGR"
+    calibration_status: CalibrationStatus = CalibrationStatus.METRIC_UNVERIFIED
+
+    def validated_geometry(self) -> CameraGeometry:
+        """Metric geometry only after independent measured validation was supplied."""
+        if self.calibration_status is not CalibrationStatus.VALID_METRIC:
+            raise ProfileError("metric distances are not validated for this frame; supply held-out physical measurements")
+        return self.geometry
 
     @property
     def key(self) -> tuple[str, int]:
@@ -117,9 +126,16 @@ class ProcessorConfig:
 class BEVProcessor:
     """Turns M01 frame packets into :class:`BEVFrame` results. Thread-safe (calls are serialised)."""
 
-    def __init__(self, profile: CalibrationProfile, config: ProcessorConfig | None = None):
+    def __init__(self, profile: CalibrationProfile, config: ProcessorConfig | None = None,
+                 validation_report: ValidationReport | None = None):
         profile.require_metric()
+        if validation_report is not None and (not isinstance(validation_report, ValidationReport)
+                or validation_report.evidence != "measured" or not validation_report.results
+                or not validation_report.passed or validation_report.profile_fingerprint != profile.fingerprint()):
+            raise ProfileError("VALID_METRIC needs a passing measured validation report for this exact profile")
         self.profile = profile
+        self.calibration_status = (CalibrationStatus.VALID_METRIC if validation_report is not None
+                                   else CalibrationStatus.METRIC_UNVERIFIED)
         self.config = config or ProcessorConfig()
         self._mapper = BEVMapper(profile)               # built now: the first frame pays no setup cost
         self._rescaled: dict[tuple[int, int], BEVMapper] = {}
@@ -192,7 +208,8 @@ class BEVProcessor:
             acquired_unix_ns=int(packet.acquired_unix_ns), acquired_monotonic_ns=int(packet.acquired_monotonic_ns),
             source_width=w, source_height=h, processed_monotonic_ns=time.monotonic_ns(), processing_seconds=duration,
             profile_fingerprint=self._fingerprint, source_frames_skipped=skipped,
-            source_presentation_ms=getattr(packet, "presentation_ms", None), undistorted_image=undistorted, notes=tuple(notes))
+            source_presentation_ms=getattr(packet, "presentation_ms", None), undistorted_image=undistorted, notes=tuple(notes),
+            calibration_status=self.calibration_status)
         self._last = frame
         self._last_frame_id_by_session = key
         self._last_source_id = source_id

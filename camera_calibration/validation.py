@@ -45,6 +45,7 @@ class ValidationReport:
     results: tuple[CheckResult, ...]
     evidence: str                 # "self-consistency" or "measured"
     notes: tuple[str, ...] = ()
+    profile_fingerprint: str | None = None
 
     @property
     def passed(self) -> bool:
@@ -164,7 +165,7 @@ class CalibrationValidator:
                 detail += " (an endpoint lies outside the calibrated hull: extrapolation)"
             results.append(CheckResult(label, err <= tolerance_m, err, tolerance_m, "m", detail))
         notes.append("only points on the road plane are valid; a raised mark (e.g. the top of a cone) is mapped to the ground behind it")
-        return ValidationReport(tuple(results), "measured", tuple(notes))
+        return ValidationReport(tuple(results), "measured", tuple(notes), self.profile.fingerprint())
 
     def check_held_out_points(self, image_points_px: Any, ground_points_m: Any, tolerance_m: float, *,
                               undistorted: bool = False) -> ValidationReport:
@@ -184,4 +185,4 @@ class CalibrationValidator:
             results.append(CheckResult("RMS error", bool(np.sqrt(np.nanmean(err[valid] ** 2)) <= tolerance_m),
                                        float(np.sqrt(np.nanmean(err[valid] ** 2))), tolerance_m, "m"))
         notes = ["points reused from the calibration set would be circular evidence; use independent measurements"]
-        return ValidationReport(tuple(results), "measured", tuple(notes))
+        return ValidationReport(tuple(results), "measured", tuple(notes), self.profile.fingerprint())

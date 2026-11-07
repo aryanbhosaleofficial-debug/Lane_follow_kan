@@ -8,7 +8,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from ipm_transform import IPMTransformer
+from lane_detection.ipm_transform import IPMTransformer
 
 
 class TestIPMTransformer(unittest.TestCase):

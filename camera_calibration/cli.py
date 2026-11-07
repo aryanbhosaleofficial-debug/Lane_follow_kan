@@ -289,6 +289,19 @@ def cmd_check_distances(args: argparse.Namespace) -> int:
                                          e["distance_m"], str(e.get("label", "")), bool(e.get("undistorted", False))))
     report = CalibrationValidator(profile).check_distances(items, args.tolerance_m)
     print(report)
+    if args.report_out:
+        report_path = Path(args.report_out)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps({
+            "profile_fingerprint": report.profile_fingerprint,
+            "evidence": report.evidence,
+            "passed": report.passed,
+            "tolerance_m": args.tolerance_m,
+            "results": [{"name": r.name, "passed": r.passed, "error_m": r.value if math.isfinite(r.value) else None,
+                         "limit_m": r.limit, "detail": r.detail} for r in report.results],
+            "note": "Operator-supplied measurements; confirm these were independent held-out physical distances."
+        }, indent=2, allow_nan=False), encoding="utf-8")
+        print(f"wrote validation report to {report_path}")
     return 0 if report.passed else 2
 
 
@@ -440,6 +453,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("check-distances", help="compare tape-measured distances with the calibration")
     p.add_argument("--profile", required=True); p.add_argument("--measurements", required=True)
     p.add_argument("--tolerance-m", type=float, required=True, help="your acceptance tolerance in metres (no default: it is your decision)")
+    p.add_argument("--report-out", help="write measured-distance results and profile fingerprint as JSON")
     p.set_defaults(func=cmd_check_distances)
 
     p = sub.add_parser("live", help="real-time raw | BEV through M01")

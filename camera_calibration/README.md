@@ -247,3 +247,105 @@ On the vehicle / Raspberry Pi 5, camera mounted, vehicle safely stationary:
 4. Run `live` / `BEVWorker` for an extended period: measure BEV latency, `age_seconds()` p95, CPU, memory and temperature on the Pi 5; compare `fixed_point_maps` True/False.
 5. Exercise source switches, unplug/replug and a camera restart; confirm no stale BEV is ever used.
 6. Re-verify after any vibration test or re-mounting; define the recalibration trigger for your vehicle.
+
+## Recorded project video validation (pixel demonstration)
+
+The project recording is `videos/test.mp4` (864 x 496, nominal 23.998 FPS, 590 frames). The existing
+`calibration/ipm_calibration.json` expects 1920 x 1080, has no intrinsic coefficients, and has
+`physical_scale: null`. It cannot calibrate this video metrically. The following command processes
+the entire recording through M01 and produces an explicitly uncalibrated pixel-only comparison:
+
+```text
+python -m camera_calibration.video_validation --video videos/test.mp4 --out outputs/m02_video_validation --quad 365 20 700 20 863 495 0 495
+python -m unittest camera_calibration.test_video_validation -v
+python -m unittest camera_calibration.video_asset_tests -v
+```
+
+The quadrilateral is a manually chosen visualization on frame 1 in TL, TR, BR, BL order. It is
+not a measured road rectangle. Adjust it for other videos; do not interpret output pixel distance
+as metres. `--limit N` provides a short trial. The command writes synchronized comparison, BEV and
+validity-mask MP4 files, sample JPEGs (spread over the actual length), per-frame M01 metadata in
+JSONL, and aggregate metrics. Every saved MP4 is reopened and decoded after writing; a skipped
+source frame ID, **including frames lost before the first read**, fails the run. While a run is in
+progress, and after any failure, the folder holds `RUN_INCOMPLETE.txt` (with the error) and no
+`processing_metrics.json`, so stale metrics can never vouch for partial videos. The original video
+is never modified. A compatible M02 metric profile can be supplied with `--profile PATH` instead of
+`--quad`, subject to exact resolution and source checks; only that mode runs M02's runtime
+(`transform_engine` in the metrics says which engine produced the frames).
+
+**What the pixel demonstration is not (measured in the independent review).**
+
+* **Not a bird's-eye view, even on frame 1.** Lane boundaries that are parallel on the floor stay 46-69 degrees apart after
+  this warp (54 degrees on frame 1): the quad's top edge (y = 20) lies above the floor, in the wall and door reflections.
+  A quad whose left and right edges lie *on* the two lane boundaries makes them parallel on its own frame.
+* **No fixed homography fits this recording.** The camera's attitude to the floor changes (strong roll at the start,
+  near-vertical view at the end; the lane vanishing point moves about 100 px within the first 6 s). Even a lane-aligned
+  quad from frame 1 leaves 12-20 degrees of non-parallelism by frames 61-139. A BEV needs footage from a camera rigidly
+  mounted on the vehicle, which this recording is not.
+* **No calibration content.** The recording has no chessboard and no measured ground references, so neither intrinsic
+  nor metric calibration can be derived from it. Physical metric accuracy cannot be verified from this video.
+
+The validity mask shows pixels sampled from the input image; it is not a calibrated-region or
+occlusion mask. With a quad that lies inside the image (as above) every output pixel is sampled, so
+the mask is uniformly white and carries no information. No undistortion occurs in pixel mode because
+intrinsics for this video are absent. The real-video tests also drive the first 120 frames through
+M02's actual runtime (`BEVWorker`) with a clearly labelled PLACEHOLDER-geometry profile: that checks
+frame identity, completeness, bit-exact output and non-mutation of M01's frames, not geometry.
+M01's legacy `read()` mailbox replacement counter may rise while `wait_for_frame()` still processes
+every source frame. Use the explicit skipped-ID count to assess this pipeline's completeness.
+The nominal-FPS-paced pipeline is for complete export; elapsed time includes pacing and should
+not be called camera FPS. Run `python -m camera_calibration.benchmark` separately for synthetic
+metric-remap performance on the current computer.
+
+
+## Corrective review: trust states and real-video limits
+
+`BEVFrame.calibration_status` is `METRIC_UNVERIFIED` by default even when a profile contains metres.
+It becomes `VALID_METRIC` only when `BEVProcessor(profile, validation_report=report)` receives a
+passing **measured** `CalibrationValidator` report bound to that exact profile fingerprint.
+`bev.validated_geometry()` raises `ProfileError` otherwise. The older `bev.geometry` attribute
+remains for compatibility; any coordinates it returns are profile coordinates and must not be
+used as physical truth without independent validation. The video exporter reports `PIXEL_ONLY`
+for `--quad`. Missing or incompatible metric calibration raises rather than producing a metric
+output. M01 session changes alone do not invalidate calibration, but a changed camera/lens,
+focus, crop, zoom, mounting pose or effective resolution does.
+
+The mounted-camera workflow is: fix the camera rigidly, lock resolution and lens/focus settings,
+record camera height and origin, then capture varied checkerboard views at that resolution.
+Measure the checkerboard square side; run the `intrinsic` command above. Place at least four,
+preferably six or more, non-collinear ground marks and measure their X-forward/Y-left positions
+in metres from the documented vehicle origin. Keep independent held-out marks and distances.
+Run `pick-points`, `road-plane`, `info`, and finally:
+
+```text
+python -m camera_calibration check-distances --profile vehicle_metric.json --measurements dist.json --tolerance-m 0.01 --report-out measured_validation.json
+python -m camera_calibration.pose_diagnostics --video videos/test.mp4 --out outputs/m02_video_review/viewpoint_diagnostic.json
+```
+
+Inspect the report, reference-point overlay and metric grid against independent ruler
+measurements. The tolerance is an operator decision. A saved report records a profile fingerprint
+and errors but cannot prove the operator truly measured independent points. Once valid measured
+references exist, create a report in Python using `CalibrationValidator(profile).check_distances(...)`
+and pass it to `BEVProcessor`. A synthetic or self-consistency report is not physical evidence.
+
+The pose diagnostic samples frames and reports ORB match counts. On moving-vehicle footage,
+feature motion is ambiguous and the conclusion is `INCONCLUSIVE_FOR_MOUNTING_STABILITY`. With a
+stationary camera/target recording, `--stationary-points points.json --max-shift-px 3` can compare
+four or more corresponding target pixels per selected frame. The file must contain
+`{"target_stationary": true, "frames": [{"frame_id": 1, "points_px": [[x,y], ...]}, ...]}`.
+This checks target/camera repeatability during that recording; it cannot certify later mounting
+stability while driving. Never derive a frame-wise metric homography from moving-scene feature
+matches alone.
+
+`python -m camera_calibration.video_validation` produces a labeled perspective demonstration in
+pixel mode; it draws the chosen quad on a copy of the original frame. The raw validity mask is
+unchanged (it may be all white for an in-frame quad). `mask_diagnostic.mp4` displays its coverage
+percentage and the unknown ground support. Metric mode draws measured reference points and a
+grid on copies; shared M01 source arrays are not used as drawing canvases. Run the real-video
+asset tests explicitly with `python -m unittest camera_calibration.video_asset_tests -v`.
+Repository-wide discovery now includes the three lane IPM tests; run
+`python -m unittest discover -q` from the repository root.
+
+Hardware checks remain **NOT RUN**: measure real-camera frame age/FPS and M02 p50/p95/p99 latency,
+CPU, native/Python memory and temperature on the Raspberry Pi 5; verify resolution changes,
+source switches, restart, vibration/re-mounting, and an extended run before vehicle use.

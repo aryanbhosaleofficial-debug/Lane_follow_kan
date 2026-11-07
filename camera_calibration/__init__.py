@@ -29,6 +29,7 @@ from .profile import CalibrationProfile, new_profile
 from .roadplane import RoadPlaneCalibration
 from .undistort import Undistorter, UndistortionSpec
 from .validation import CalibrationValidator, DistanceMeasurement, ValidationReport
+from .status import CalibrationStatus
 
 __all__ = [
     "BEVConfig", "BEVFrame", "BEVMapInfo", "BEVMapper", "BEVProcessor", "BEVWorker", "CalibrationError", "CalibrationProfile",
@@ -38,4 +39,5 @@ __all__ = [
     "InvalidFrameError", "ManagerFrameSource", "ProcessorConfig", "ProfileError", "ResolutionMismatchError", "RoadPlaneCalibration",
     "RoadPlaneCalibrator", "RoadPlaneConfig", "SourceMismatchError", "StaleFrameError", "Undistorter", "UndistortionSpec",
     "ValidationReport", "new_profile",
+    "CalibrationStatus",
 ]
