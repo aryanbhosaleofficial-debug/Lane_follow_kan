@@ -4,14 +4,14 @@ A lightweight, classical-computer-vision perception system for a small autonomou
 
 The project starts with OpenCV-based edge and line detection, then progressively adds bird's-eye-view geometry, temporal lane tracking, waypoint generation, and intersection perception. The first major release targets reliable lane perception and local waypoint output. Motion compensation and route-level navigation are planned as later milestones.
 
-> **Project status:** Early development. The current baseline detects mostly straight lane boundaries. It is not yet a complete autonomous-driving or vehicle-control system.
+> **Project status:** M01 acquisition and M02 calibration/BEV have regression-tested implementations. M03 now adds per-frame straight, curved, dashed and broken boundary detection over M02 BEV frames, with conservative ambiguity and calibration handling. See [M03 usage](lane_detection/advanced/README.md) and [final corrective validation](lane_detection/M03_FINAL_REPORT.md). Physical-track and Raspberry Pi validation remain outstanding. This is not a complete autonomous-driving or vehicle-control system.
 
 ## Roadmap
 
 | Version | Milestone | Main outcome | Status |
 |---|---|---|---|
 | `v0.1.0` | Classical lane-detection baseline | Canny, ROI, Hough segments, left/right line fitting, midpoint and lateral error | Baseline implemented; needs regression tests |
-| `v0.2.0` | Inverse Perspective Mapping (IPM) | Transform camera view into a bird's-eye view (BEV) using a homography | **Next** |
+| `v0.2.0` | Inverse Perspective Mapping (IPM) | Transform camera view into a bird's-eye view (BEV) using a homography | M02 implemented; physical calibration validation depends on deployment |
 | `v0.3.0` | Temporal lane tracking | Stabilize lane observations across frames and bridge short gaps in broken markings | Planned |
 | `v0.4.0` | Waypoint generation | Convert the detected lane centreline into an ordered sequence of local path points | Planned |
 | `v0.5.0` | Intersection perception | Detect junction geometry and report possible path branches without choosing a route | Planned |

@@ -1,0 +1,318 @@
+{
+  "hardware": {
+    "platform": "Windows-11-10.0.26300-SP0",
+    "processor": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+    "python": "3.14.10",
+    "opencv": "5.0.0",
+    "numpy": "2.5.4",
+    "opencv_threads": 1
+  },
+  "synthetic": true,
+  "raspberry_pi_measurement": false,
+  "includes_acquisition_display_encoding": false,
+  "debug": false,
+  "frames_per_case": 200,
+  "warmup_per_case": 20,
+  "cases": [
+    {
+      "name": "solid",
+      "source_size": null,
+      "bev_size": [
+        320,
+        240
+      ],
+      "setup_ms": 4.231299999446492,
+      "wall_latency": {
+        "median_ms": 5.709899999601475,
+        "p95_ms": 6.510115000310179,
+        "worst_ms": 8.15129999864439
+      },
+      "throughput_fps": 173.16501578324502,
+      "valid_observations": 200,
+      "validity_counts": {
+        "valid": 200,
+        "uncertain": 0,
+        "invalid": 0
+      },
+      "workload_note": "independent synthetic pixel-polynomial truth",
+      "m03_stages": {
+        "preprocessing_ms": {
+          "median_ms": 0.8560499991290271,
+          "p95_ms": 1.0999049993188235,
+          "worst_ms": 1.505499998529558
+        },
+        "extraction_ms": {
+          "median_ms": 3.463200000624056,
+          "p95_ms": 4.155389999596081,
+          "worst_ms": 5.36640000063926
+        },
+        "fitting_ms": {
+          "median_ms": 1.1184499999217223,
+          "p95_ms": 1.5028399999209794,
+          "worst_ms": 2.013999999689986
+        },
+        "association_ms": {
+          "median_ms": 0.1382000000376138,
+          "p95_ms": 0.22979499908615234,
+          "worst_ms": 0.3941000013583107
+        },
+        "total_ms": {
+          "median_ms": 5.681999999978871,
+          "p95_ms": 6.465920000755432,
+          "worst_ms": 8.118699999613455
+        }
+      }
+    },
+    {
+      "name": "curved_dashed_noise",
+      "source_size": null,
+      "bev_size": [
+        320,
+        240
+      ],
+      "setup_ms": 10.757699999885517,
+      "wall_latency": {
+        "median_ms": 8.100699999886274,
+        "p95_ms": 13.193309998860057,
+        "worst_ms": 19.471099998554564
+      },
+      "throughput_fps": 114.25206542068855,
+      "valid_observations": 200,
+      "validity_counts": {
+        "valid": 200,
+        "uncertain": 0,
+        "invalid": 0
+      },
+      "workload_note": "independent synthetic pixel-polynomial truth",
+      "m03_stages": {
+        "preprocessing_ms": {
+          "median_ms": 0.8766999990257318,
+          "p95_ms": 1.392464999753428,
+          "worst_ms": 1.8803000002662884
+        },
+        "extraction_ms": {
+          "median_ms": 4.418850000547536,
+          "p95_ms": 7.323799999994662,
+          "worst_ms": 13.83700000042154
+        },
+        "fitting_ms": {
+          "median_ms": 2.5642999999035965,
+          "p95_ms": 4.06859500035351,
+          "worst_ms": 6.330100000923267
+        },
+        "association_ms": {
+          "median_ms": 0.1414499993188656,
+          "p95_ms": 0.2428700012387702,
+          "worst_ms": 0.39600000127393287
+        },
+        "total_ms": {
+          "median_ms": 8.058399999754329,
+          "p95_ms": 13.085650000266467,
+          "worst_ms": 19.43550000032701
+        }
+      }
+    },
+    {
+      "name": "m02_plus_m03",
+      "source_size": [
+        320,
+        240
+      ],
+      "bev_size": [
+        320,
+        240
+      ],
+      "setup_ms": 229.0300999993633,
+      "wall_latency": {
+        "median_ms": 8.446049999292882,
+        "p95_ms": 15.909714998997515,
+        "worst_ms": 19.035100000110106
+      },
+      "throughput_fps": 102.8476985002347,
+      "valid_observations": 0,
+      "validity_counts": {
+        "valid": 0,
+        "uncertain": 200,
+        "invalid": 0
+      },
+      "workload_note": "M02 synthetic road includes a centre dashed marking; multiple candidates, no selected lane expected",
+      "m03_stages": {
+        "preprocessing_ms": {
+          "median_ms": 0.8963000000221655,
+          "p95_ms": 1.5601050015902729,
+          "worst_ms": 2.732099999775528
+        },
+        "extraction_ms": {
+          "median_ms": 4.245250000167289,
+          "p95_ms": 8.991654999681487,
+          "worst_ms": 12.278000000151224
+        },
+        "fitting_ms": {
+          "median_ms": 1.8737500004135654,
+          "p95_ms": 3.8387749986213744,
+          "worst_ms": 5.729700000301818
+        },
+        "association_ms": {
+          "median_ms": 0.2930999989985139,
+          "p95_ms": 0.7664150004529802,
+          "worst_ms": 1.82189999941329
+        },
+        "total_ms": {
+          "median_ms": 7.708750000347209,
+          "p95_ms": 14.619239999865384,
+          "worst_ms": 17.80249999865191
+        }
+      }
+    },
+    {
+      "name": "solid",
+      "source_size": null,
+      "bev_size": [
+        640,
+        480
+      ],
+      "setup_ms": 3.3702000000630505,
+      "wall_latency": {
+        "median_ms": 11.625399999502406,
+        "p95_ms": 21.9901449995632,
+        "worst_ms": 27.696799999830546
+      },
+      "throughput_fps": 75.19610297733283,
+      "valid_observations": 200,
+      "validity_counts": {
+        "valid": 200,
+        "uncertain": 0,
+        "invalid": 0
+      },
+      "workload_note": "independent synthetic pixel-polynomial truth",
+      "m03_stages": {
+        "preprocessing_ms": {
+          "median_ms": 2.664000000550004,
+          "p95_ms": 4.506504998698801,
+          "worst_ms": 7.130799998776638
+        },
+        "extraction_ms": {
+          "median_ms": 7.495049999306502,
+          "p95_ms": 16.818355000577867,
+          "worst_ms": 20.748200000525685
+        },
+        "fitting_ms": {
+          "median_ms": 1.1515500000314205,
+          "p95_ms": 2.458120000846973,
+          "worst_ms": 4.450200000064797
+        },
+        "association_ms": {
+          "median_ms": 0.15180000082182232,
+          "p95_ms": 0.36333000143713434,
+          "worst_ms": 0.8713000006537186
+        },
+        "total_ms": {
+          "median_ms": 11.5869000001112,
+          "p95_ms": 21.966719999636553,
+          "worst_ms": 27.667100001053768
+        }
+      }
+    },
+    {
+      "name": "curved_dashed_noise",
+      "source_size": null,
+      "bev_size": [
+        640,
+        480
+      ],
+      "setup_ms": 16.18389999930514,
+      "wall_latency": {
+        "median_ms": 14.221899999938614,
+        "p95_ms": 22.514830000272916,
+        "worst_ms": 32.04870000081428
+      },
+      "throughput_fps": 63.18690284589853,
+      "valid_observations": 200,
+      "validity_counts": {
+        "valid": 200,
+        "uncertain": 0,
+        "invalid": 0
+      },
+      "workload_note": "independent synthetic pixel-polynomial truth",
+      "m03_stages": {
+        "preprocessing_ms": {
+          "median_ms": 2.6554000005489797,
+          "p95_ms": 3.824674999395936,
+          "worst_ms": 4.838799999561161
+        },
+        "extraction_ms": {
+          "median_ms": 7.89115000043239,
+          "p95_ms": 13.518535001003318,
+          "worst_ms": 20.150700000158395
+        },
+        "fitting_ms": {
+          "median_ms": 3.104899999925692,
+          "p95_ms": 5.398635000710782,
+          "worst_ms": 7.540299999163835
+        },
+        "association_ms": {
+          "median_ms": 0.15189999976428226,
+          "p95_ms": 0.27226000056543753,
+          "worst_ms": 0.3845000010187505
+        },
+        "total_ms": {
+          "median_ms": 14.049950001208344,
+          "p95_ms": 22.332144999290897,
+          "worst_ms": 31.87640000032843
+        }
+      }
+    },
+    {
+      "name": "m02_plus_m03",
+      "source_size": [
+        640,
+        480
+      ],
+      "bev_size": [
+        640,
+        480
+      ],
+      "setup_ms": 765.6262999989849,
+      "wall_latency": {
+        "median_ms": 14.596699999856355,
+        "p95_ms": 24.718795000899245,
+        "worst_ms": 32.371400000556605
+      },
+      "throughput_fps": 61.443390652618916,
+      "valid_observations": 0,
+      "validity_counts": {
+        "valid": 0,
+        "uncertain": 200,
+        "invalid": 0
+      },
+      "workload_note": "M02 synthetic road includes a centre dashed marking; multiple candidates, no selected lane expected",
+      "m03_stages": {
+        "preprocessing_ms": {
+          "median_ms": 2.7950999992754078,
+          "p95_ms": 4.572529999404651,
+          "worst_ms": 7.213699998828815
+        },
+        "extraction_ms": {
+          "median_ms": 7.3013500004890375,
+          "p95_ms": 13.95343000003775,
+          "worst_ms": 19.14510000096925
+        },
+        "fitting_ms": {
+          "median_ms": 1.7374500002915738,
+          "p95_ms": 3.4881100003985903,
+          "worst_ms": 5.577300000368268
+        },
+        "association_ms": {
+          "median_ms": 0.2845500002877088,
+          "p95_ms": 0.7208850004644771,
+          "worst_ms": 0.890600000275299
+        },
+        "total_ms": {
+          "median_ms": 12.295100000301318,
+          "p95_ms": 21.05358000044361,
+          "worst_ms": 29.724599999099155
+        }
+      }
+    }
+  ]
+}

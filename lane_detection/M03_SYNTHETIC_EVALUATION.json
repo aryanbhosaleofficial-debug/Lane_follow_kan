@@ -1,0 +1,184 @@
+{
+  "synthetic_only": true,
+  "metric_evidence": false,
+  "cases": [
+    {
+      "name": "straight",
+      "expected_valid": true,
+      "valid": true,
+      "validity": "valid",
+      "confidence": 0.8299858432112059,
+      "reason_codes": [
+        "pixel_geometry_only"
+      ],
+      "max_boundary_error_px": 2.842170943040401e-14,
+      "max_centreline_error_px": 2.842170943040401e-14,
+      "passed": true
+    },
+    {
+      "name": "gentle_curve",
+      "expected_valid": true,
+      "valid": true,
+      "validity": "valid",
+      "confidence": 0.813132707564018,
+      "reason_codes": [
+        "pixel_geometry_only"
+      ],
+      "max_boundary_error_px": 0.08416455696200842,
+      "max_centreline_error_px": 0.04588558909443918,
+      "passed": true
+    },
+    {
+      "name": "tight_curve",
+      "expected_valid": true,
+      "valid": true,
+      "validity": "valid",
+      "confidence": 0.8039528849657619,
+      "reason_codes": [
+        "pixel_geometry_only"
+      ],
+      "max_boundary_error_px": 0.40354040895812204,
+      "max_centreline_error_px": 0.32926460564749505,
+      "passed": true
+    },
+    {
+      "name": "dashed_curve",
+      "expected_valid": true,
+      "valid": true,
+      "validity": "valid",
+      "confidence": 0.6104870187297884,
+      "reason_codes": [
+        "pixel_geometry_only"
+      ],
+      "max_boundary_error_px": 0.2483736053093395,
+      "max_centreline_error_px": 0.1744189505697875,
+      "passed": true
+    },
+    {
+      "name": "broken_curve",
+      "expected_valid": true,
+      "valid": true,
+      "validity": "valid",
+      "confidence": 0.7365719398803087,
+      "reason_codes": [
+        "pixel_geometry_only"
+      ],
+      "max_boundary_error_px": 0.10050696862663244,
+      "max_centreline_error_px": 0.06628271490200177,
+      "passed": true
+    },
+    {
+      "name": "shadow",
+      "expected_valid": true,
+      "valid": true,
+      "validity": "valid",
+      "confidence": 0.8299858432112053,
+      "reason_codes": [
+        "pixel_geometry_only"
+      ],
+      "max_boundary_error_px": 2.842170943040401e-14,
+      "max_centreline_error_px": 2.842170943040401e-14,
+      "passed": true
+    },
+    {
+      "name": "noise",
+      "expected_valid": true,
+      "valid": true,
+      "validity": "valid",
+      "confidence": 0.8098599376138939,
+      "reason_codes": [
+        "pixel_geometry_only"
+      ],
+      "max_boundary_error_px": 0.18321973385265267,
+      "max_centreline_error_px": 0.096802986043528,
+      "passed": true
+    },
+    {
+      "name": "dashed_curve_noise",
+      "expected_valid": true,
+      "valid": true,
+      "validity": "valid",
+      "confidence": 0.6035404885247225,
+      "reason_codes": [
+        "pixel_geometry_only"
+      ],
+      "max_boundary_error_px": 0.2483736053093395,
+      "max_centreline_error_px": 0.21459543615154075,
+      "passed": true
+    },
+    {
+      "name": "one_boundary",
+      "expected_valid": false,
+      "valid": false,
+      "validity": "uncertain",
+      "confidence": 0.29049504512392205,
+      "reason_codes": [
+        "pixel_geometry_only",
+        "single_observed_boundary"
+      ],
+      "max_boundary_error_px": null,
+      "max_centreline_error_px": null,
+      "passed": true
+    },
+    {
+      "name": "empty",
+      "expected_valid": false,
+      "valid": false,
+      "validity": "invalid",
+      "confidence": 0.0,
+      "reason_codes": [
+        "pixel_geometry_only",
+        "no_supported_boundaries"
+      ],
+      "max_boundary_error_px": null,
+      "max_centreline_error_px": null,
+      "passed": true
+    },
+    {
+      "name": "noise_only",
+      "expected_valid": false,
+      "valid": false,
+      "validity": "invalid",
+      "confidence": 0.0,
+      "reason_codes": [
+        "pixel_geometry_only",
+        "no_supported_boundaries"
+      ],
+      "max_boundary_error_px": null,
+      "max_centreline_error_px": null,
+      "passed": true
+    },
+    {
+      "name": "multiple_lanes",
+      "expected_valid": false,
+      "valid": false,
+      "validity": "uncertain",
+      "confidence": 0.2904950451239212,
+      "reason_codes": [
+        "pixel_geometry_only",
+        "multiple_compatible_pairs",
+        "ambiguous_geometry"
+      ],
+      "max_boundary_error_px": null,
+      "max_centreline_error_px": null,
+      "passed": true
+    },
+    {
+      "name": "junction",
+      "expected_valid": false,
+      "valid": false,
+      "validity": "uncertain",
+      "confidence": 0.25352839185189074,
+      "reason_codes": [
+        "pixel_geometry_only",
+        "branch_geometry",
+        "ambiguous_geometry"
+      ],
+      "max_boundary_error_px": null,
+      "max_centreline_error_px": null,
+      "passed": true
+    }
+  ],
+  "passed": 13,
+  "failed": 0
+}

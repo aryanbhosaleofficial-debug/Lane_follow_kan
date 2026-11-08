@@ -1,5 +1,12 @@
 # Classical Lane Detection — White Lines on a Black Floor
 
+This page describes the preserved **legacy raw-image compatibility path**. M03's
+BEV-based advanced detector, structured observations, CLI and tests are documented
+in [advanced/README.md](advanced/README.md). The two paths use different input and
+coordinate contracts; legacy IPM JSON is not an M02 metric profile.
+Current M03 repairs and reproducible evidence are in
+[M03_FINAL_REPORT.md](M03_FINAL_REPORT.md).
+
 A lightweight, CPU-based lane detector using OpenCV Canny edge detection, a region of interest (ROI), the probabilistic Hough transform, and least-squares line fitting.
 
 The intended platform is a small forward-facing camera on a 1:10 autonomous vehicle.
